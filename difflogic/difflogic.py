@@ -20,6 +20,8 @@ class LogicLayer(torch.nn.Module):
             grad_factor: float = 1.,
             implementation: str = None,
             connections: str = 'random',
+            hard_weights: bool = False,
+            ste: bool = True,
     ):
         """
         :param in_dim:      input dimensionality of the layer
@@ -35,7 +37,7 @@ class LogicLayer(torch.nn.Module):
         self.out_dim = out_dim
         self.device = device
         self.grad_factor = grad_factor
-
+        self.hard_weights = hard_weights
         """
         The CUDA implementation is the fast implementation. As the name implies, the cuda implementation is only 
         available for device='cuda'. The `python` implementation exists for 2 reasons:
@@ -48,6 +50,7 @@ class LogicLayer(torch.nn.Module):
         elif self.implementation is None and device == 'cpu':
             self.implementation = 'python'
         assert self.implementation in ['cuda', 'python'], self.implementation
+    
 
         self.connections = connections
         assert self.connections in ['random', 'unique'], self.connections
@@ -70,6 +73,7 @@ class LogicLayer(torch.nn.Module):
 
         self.num_neurons = out_dim
         self.num_weights = out_dim
+        self.ste = ste
 
     def forward(self, x):
         if isinstance(x, PackBitsTensor):
@@ -95,13 +99,22 @@ class LogicLayer(torch.nn.Module):
         assert x.shape[-1] == self.in_dim, (x[0].shape[-1], self.in_dim)
 
         if self.indices[0].dtype == torch.int64 or self.indices[1].dtype == torch.int64:
-            print(self.indices[0].dtype, self.indices[1].dtype)
             self.indices = self.indices[0].long(), self.indices[1].long()
-            print(self.indices[0].dtype, self.indices[1].dtype)
 
         a, b = x[..., self.indices[0]], x[..., self.indices[1]]
         if self.training:
-            x = bin_op_s(a, b, torch.nn.functional.softmax(self.weights, dim=-1))
+            if self.ste: #STE
+                weights = torch.nn.functional.softmax(self.weights, dim=-1)
+                w_hard = torch.nn.functional.one_hot(self.weights.argmax(-1), 16).to(torch.float32)
+                weights_ste = w_hard.detach() + (weights - weights.detach()) 
+                weights = weights_ste
+            else:
+                if self.hard_weights:
+                    weights = torch.nn.functional.one_hot(self.weights.argmax(-1), 16).to(torch.float32)
+                else:
+                    weights = torch.nn.functional.softmax(self.weights, dim=-1)
+
+            x = bin_op_s(a, b, weights)
         else:
             weights = torch.nn.functional.one_hot(self.weights.argmax(-1), 16).to(torch.float32)
             x = bin_op_s(a, b, weights)
@@ -120,7 +133,11 @@ class LogicLayer(torch.nn.Module):
         a, b = self.indices
 
         if self.training:
+            # Use softmax instead of one_hot to ensure gradients are properly propagated
             w = torch.nn.functional.softmax(self.weights, dim=-1).to(x.dtype)
+            if self.ste:
+                w_hard = torch.nn.functional.one_hot(self.weights.argmax(-1), 16).to(torch.float32)
+                w = w_hard.detach() + (w - w.detach())
             return LogicLayerCudaFunction.apply(
                 x, a, b, w, self.given_x_indices_of_y_start, self.given_x_indices_of_y
             ).transpose(0, 1)
@@ -167,6 +184,7 @@ class LogicLayer(torch.nn.Module):
             return get_unique_connections(self.in_dim, self.out_dim, device)
         else:
             raise ValueError(connections)
+
 
 
 ########################################################################################################################
