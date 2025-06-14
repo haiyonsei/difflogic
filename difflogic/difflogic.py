@@ -74,6 +74,7 @@ class LogicLayer(torch.nn.Module):
         self.num_neurons = out_dim
         self.num_weights = out_dim
         self.ste = ste
+        self.tau = 1.0
 
     def forward(self, x):
         if isinstance(x, PackBitsTensor):
@@ -104,15 +105,16 @@ class LogicLayer(torch.nn.Module):
         a, b = x[..., self.indices[0]], x[..., self.indices[1]]
         if self.training:
             if self.ste: #STE
-                weights = torch.nn.functional.softmax(self.weights, dim=-1)
+                weights = torch.nn.functional.softmax(self.weights/self.tau, dim=-1)
                 w_hard = torch.nn.functional.one_hot(self.weights.argmax(-1), 16).to(torch.float32)
                 weights_ste = w_hard.detach() + (weights - weights.detach()) 
                 weights = weights_ste
+                #weights = torch.nn.functional.gumbel_softmax(self.weights, tau=self.tau, hard=True, dim=-1) 
             else:
                 if self.hard_weights:
                     weights = torch.nn.functional.one_hot(self.weights.argmax(-1), 16).to(torch.float32)
                 else:
-                    weights = torch.nn.functional.softmax(self.weights, dim=-1)
+                    weights = torch.nn.functional.softmax(self.weights/self.tau, dim=-1)
 
             x = bin_op_s(a, b, weights)
         else:
@@ -134,7 +136,7 @@ class LogicLayer(torch.nn.Module):
 
         if self.training:
             # Use softmax instead of one_hot to ensure gradients are properly propagated
-            w = torch.nn.functional.softmax(self.weights, dim=-1).to(x.dtype)
+            w = torch.nn.functional.softmax(self.weights/self.tau, dim=-1).to(x.dtype)
             if self.ste:
                 w_hard = torch.nn.functional.one_hot(self.weights.argmax(-1), 16).to(torch.float32)
                 w = w_hard.detach() + (w - w.detach())
@@ -194,7 +196,7 @@ class GroupSum(torch.nn.Module):
     """
     The GroupSum module.
     """
-    def __init__(self, k: int, tau: float = 1., device='cuda'):
+    def __init__(self, k: int, tau: float = 1., device='cuda', noise_prob: float = 0.0):
         """
 
         :param k: number of intended real valued outputs, e.g., number of classes
@@ -205,8 +207,19 @@ class GroupSum(torch.nn.Module):
         self.k = k
         self.tau = tau
         self.device = device
-
+        self.noise_prob = noise_prob
     def forward(self, x):
+        if self.training and self.noise_prob > 0.0:
+            # (same shape) Bernoulli(p) mask
+            m = torch.bernoulli(
+                    torch.full_like(x, self.noise_prob)
+                ).detach()                # mask 자체는 gradient X
+            # XOR : 0→1, 1→0  (x must be 0/1)
+            x = (x + m) % 2
+            # ─ 실수 0‥1 입력을 “반전”하고 싶으면 대신 ↓ 사용
+            #x = x * (1 - m) + (1 - x) * m
+
+
         if isinstance(x, PackBitsTensor):
             return x.group_sum(self.k)
 
