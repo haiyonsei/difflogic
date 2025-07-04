@@ -3,7 +3,8 @@ import difflogic_cuda
 import numpy as np
 from .functional import bin_op_s, get_unique_connections, GradFactor
 from .packbitstensor import PackBitsTensor
-
+from typing import Optional
+import torch.nn as nn
 
 ########################################################################################################################
 
@@ -196,7 +197,7 @@ class GroupSum(torch.nn.Module):
     """
     The GroupSum module.
     """
-    def __init__(self, k: int, tau: float = 1., device='cuda', noise_prob: float = 0.0):
+    def __init__(self, k: int, tau: float = 1., beta: float = 0.0, device='cuda', noise_prob: float = 0.0):
         """
 
         :param k: number of intended real valued outputs, e.g., number of classes
@@ -208,6 +209,7 @@ class GroupSum(torch.nn.Module):
         self.tau = tau
         self.device = device
         self.noise_prob = noise_prob
+        self.beta = beta
     def forward(self, x):
         if self.training and self.noise_prob > 0.0:
             # (same shape) Bernoulli(p) mask
@@ -224,10 +226,54 @@ class GroupSum(torch.nn.Module):
             return x.group_sum(self.k)
 
         assert x.shape[-1] % self.k == 0, (x.shape, self.k)
-        return x.reshape(*x.shape[:-1], self.k, x.shape[-1] // self.k).sum(-1) / self.tau
+        y = x.reshape(*x.shape[:-1], self.k, x.shape[-1] // self.k).sum(-1) / self.tau
+        return y + self.beta
 
     def extra_repr(self):
         return 'k={}, tau={}'.format(self.k, self.tau)
+
+    
+
+# ----- WeightedGroupSum (이전 답변의 구현 가정) -------------------------
+class WeightedGroupSum(nn.Module):
+    def __init__(self, k, input_dim, tau=1.0, beta=0.0, noise_prob=0.0,
+                 reg_type="l1", init="ones", w_max=None, device='cuda'):
+        super().__init__()
+        self.k, self.tau, self.beta = k, tau, beta
+        self.input_dim = input_dim
+        self.noise_prob, self.reg_type, self.w_max = noise_prob, reg_type, w_max
+        self.device = device
+        self._init = init
+        w0 = torch.ones(self.k, self.input_dim//self.k, device=self.device) \
+                if self._init == "ones" else torch.randn(self.k, g, device=self.device)
+        self.weight_raw = nn.Parameter(w0, requires_grad=True)
+
+    @staticmethod
+    def _ste_round(w):           # STE quantization
+        return (w.round() - w).detach() + w
+
+    def forward(self, x):
+        if isinstance(x, PackBitsTensor):
+            raise NotImplementedError
+        g = x.shape[-1] // self.k
+
+        # force weight_raw to be greater than or equal to 0
+        self.weight_raw.data.clamp_(min=0)
+        w_q = self._ste_round(self.weight_raw)
+        if self.w_max is not None:
+            w_q = w_q.clamp_(0, self.w_max)
+
+
+        x = x.reshape(*x.shape[:-1], self.k, g)
+        y = (x * w_q).sum(-1) / self.tau
+        return y + self.beta
+
+    def reg_loss(self):
+        if self.reg_type == "l1":
+            return self.weight_raw.abs().sum()
+        elif self.reg_type == "l2":
+            return (self.weight_raw ** 2).sum()
+        return torch.tensor(0.0, device=self.weight_raw.device)
 
 
 ########################################################################################################################
