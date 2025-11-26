@@ -6,6 +6,7 @@ import numpy as np
 class PackBitsTensor:
     def __init__(self, t: torch.BoolTensor, bit_count=32, device='cuda'):
 
+
         assert len(t.shape) == 2, t.shape
 
         self.bit_count = bit_count

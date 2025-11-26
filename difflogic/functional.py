@@ -121,6 +121,7 @@ def get_unique_connections(in_dim, out_dim, device='cuda'):
     a, b = a.to(torch.int64), b.to(torch.int64)
     a, b = a.to(device), b.to(device)
     a, b = a.contiguous(), b.contiguous()
+    
     return a, b
 
 

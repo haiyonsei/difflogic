@@ -38,7 +38,7 @@ class LogicLayer(torch.nn.Module):
         self.out_dim = out_dim
         self.device = device
         self.grad_factor = grad_factor
-        self.hard_weights = hard_weights
+        self.hard_weights = False
         """
         The CUDA implementation is the fast implementation. As the name implies, the cuda implementation is only 
         available for device='cuda'. The `python` implementation exists for 2 reasons:
@@ -87,6 +87,7 @@ class LogicLayer(torch.nn.Module):
         else:
             if self.grad_factor != 1.:
                 x = GradFactor.apply(x, self.grad_factor)
+
 
         if self.implementation == 'cuda':
             if isinstance(x, PackBitsTensor):
