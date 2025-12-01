@@ -1,0 +1,34 @@
+ninja_required_version = 1.3
+cxx = /hai/anaconda3/envs/difflogic/bin/x86_64-conda-linux-gnu-c++
+nvcc = /hai/anaconda3/envs/difflogic/bin/nvcc
+
+cflags = -Wno-unused-result -Wsign-compare -DNDEBUG -fwrapv -O2 -Wall -fPIC -O2 -isystem /hai/anaconda3/envs/difflogic/include -fPIC -O2 -isystem /hai/anaconda3/envs/difflogic/include -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem /hai/anaconda3/envs/difflogic/include -DNDEBUG -D_FORTIFY_SOURCE=2 -O2 -isystem /hai/anaconda3/envs/difflogic/include -fPIC -I/hai/anaconda3/envs/difflogic/lib/python3.10/site-packages/torch/include -I/hai/anaconda3/envs/difflogic/lib/python3.10/site-packages/torch/include/torch/csrc/api/include -I/hai/anaconda3/envs/difflogic/lib/python3.10/site-packages/torch/include/TH -I/hai/anaconda3/envs/difflogic/lib/python3.10/site-packages/torch/include/THC -I/hai/anaconda3/envs/difflogic/include -I/hai/anaconda3/envs/difflogic/include/python3.10 -c
+post_cflags = -DTORCH_API_INCLUDE_EXTENSION_H '-DPYBIND11_COMPILER_TYPE="_gcc"' '-DPYBIND11_STDLIB="_libstdcpp"' '-DPYBIND11_BUILD_ABI="_cxxabi1011"' -DTORCH_EXTENSION_NAME=difflogic_cuda -D_GLIBCXX_USE_CXX11_ABI=0 -std=c++14
+cuda_cflags = -I/hai/anaconda3/envs/difflogic/lib/python3.10/site-packages/torch/include -I/hai/anaconda3/envs/difflogic/lib/python3.10/site-packages/torch/include/torch/csrc/api/include -I/hai/anaconda3/envs/difflogic/lib/python3.10/site-packages/torch/include/TH -I/hai/anaconda3/envs/difflogic/lib/python3.10/site-packages/torch/include/THC -I/hai/anaconda3/envs/difflogic/include -I/hai/anaconda3/envs/difflogic/include/python3.10 -c
+cuda_post_cflags = -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_BFLOAT16_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__ --expt-relaxed-constexpr --compiler-options ''"'"'-fPIC'"'"'' -lineinfo -DTORCH_API_INCLUDE_EXTENSION_H '-DPYBIND11_COMPILER_TYPE="_gcc"' '-DPYBIND11_STDLIB="_libstdcpp"' '-DPYBIND11_BUILD_ABI="_cxxabi1011"' -DTORCH_EXTENSION_NAME=difflogic_cuda -D_GLIBCXX_USE_CXX11_ABI=0 -gencode=arch=compute_86,code=compute_86 -gencode=arch=compute_86,code=sm_86 -ccbin /hai/anaconda3/envs/difflogic/bin/x86_64-conda-linux-gnu-cc -std=c++14
+cuda_dlink_post_cflags = 
+ldflags = 
+
+rule compile
+  command = $cxx -MMD -MF $out.d $cflags -c $in -o $out $post_cflags
+  depfile = $out.d
+  deps = gcc
+
+rule cuda_compile
+  depfile = $out.d
+  deps = gcc
+  command = $nvcc  $cuda_cflags -c $in -o $out $cuda_post_cflags
+
+
+
+
+
+build /hai/home/lsh/birel/difflogic/build/temp.linux-x86_64-cpython-310/difflogic/cuda/difflogic.o: compile /hai/home/lsh/birel/difflogic/difflogic/cuda/difflogic.cpp
+build /hai/home/lsh/birel/difflogic/build/temp.linux-x86_64-cpython-310/difflogic/cuda/difflogic_kernel.o: cuda_compile /hai/home/lsh/birel/difflogic/difflogic/cuda/difflogic_kernel.cu
+
+
+
+
+
+
+
