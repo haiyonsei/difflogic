@@ -114,6 +114,7 @@ class LogicLayer(torch.nn.Module):
 
         self.num_neurons = out_dim
         self.num_weights = out_dim
+        self._last_p = None
 
     def forward(self, x):
         if isinstance(x, PackBitsTensor):
@@ -146,6 +147,9 @@ class LogicLayer(torch.nn.Module):
         if self.training:
             if self.ste: #STE
                 weights = torch.nn.functional.softmax(self.weights/self.tau, dim=-1)
+                weights.retain_grad()
+                self._last_p = weights
+                
                 w_hard = torch.nn.functional.one_hot(self.weights.argmax(-1), 16).to(torch.float32)
                 weights_ste = w_hard.detach() + (weights - weights.detach()) 
                 weights = weights_ste
@@ -155,6 +159,9 @@ class LogicLayer(torch.nn.Module):
                     weights = torch.nn.functional.one_hot(self.weights.argmax(-1), 16).to(torch.float32)
                 else:
                     weights = torch.nn.functional.softmax(self.weights/self.tau, dim=-1)
+                    weights.retain_grad()
+                    self._last_p = weights
+
 
             x = bin_op_s(a, b, weights)
         else:
@@ -189,6 +196,8 @@ class LogicLayer(torch.nn.Module):
             else:
                 # 둘 다 꺼져 있으면 softmax 사용
                 w = torch.nn.functional.softmax(self.weights/self.tau, dim=-1).to(x.dtype)
+                w.retain_grad()
+                self._last_p = w
             # [수정된 로직 끝]
 
             x = LogicLayerCudaFunction.apply(
@@ -255,6 +264,42 @@ class LogicLayer(torch.nn.Module):
         # Triton eval 커널 래퍼 호출
         x.t = logic_layer_eval_triton(x.t, a, b, w)
         return x
+
+    def forward_p(self, x, p):
+        """
+        p-space 실험용 forward:
+        - self.weights / STE / tau 등을 전혀 쓰지 않고,
+        - 외부에서 주어진 gate 확률 p를 그대로 사용해서
+        forward_python과 동일한 방식으로 a, b를 뽑아 bin_op_s를 수행한다.
+
+        Args:
+            x: 입력 activation, shape [..., in_dim]
+            p: gate 확률 텐서, shape [out_dim, 16]
+            (예: p = softmax(self.weights / self.tau) 형태로 미리 계산한 값)
+        """
+        # forward_python과 동일한 shape 체크
+        assert x.shape[-1] == self.in_dim, (x[0].shape[-1], self.in_dim)
+
+        # indices dtype 정리 (int64 → long), forward_python과 동일
+        if self.indices[0].dtype == torch.int64 or self.indices[1].dtype == torch.int64:
+            self.indices = self.indices[0].long(), self.indices[1].long()
+
+        # a, b 추출: [..., out_dim]
+        a, b = x[..., self.indices[0]], x[..., self.indices[1]]
+
+        # p shape / dtype 정리
+        assert p.shape[0] == self.out_dim and p.shape[1] == 16, \
+            f"p shape must be [out_dim, 16], got {p.shape}, expected [{self.out_dim}, 16]"
+
+        # x와 device/dtype 맞춰줌
+        p_used = p.to(dtype=a.dtype, device=a.device)
+
+        # training/eval 여부와 상관 없이, 주어진 p를 그대로 사용
+        x_out = bin_op_s(a, b, p_used)
+
+        return x_out
+
+
 
 
     def extra_repr(self):
