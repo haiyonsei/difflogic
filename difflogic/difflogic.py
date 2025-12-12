@@ -158,9 +158,10 @@ class LogicLayer(torch.nn.Module):
                 if self.hard_weights:
                     weights = torch.nn.functional.one_hot(self.weights.argmax(-1), 16).to(torch.float32)
                 else:
-                    weights = torch.nn.functional.softmax(self.weights/self.tau, dim=-1)
-                    weights.retain_grad()
-                    self._last_p = weights
+                    self._last_p = torch.nn.functional.softmax(self.weights/self.tau, dim=-1)
+                    if self._last_p.requires_grad:
+                        self._last_p.retain_grad()
+                    weights = self._last_p
 
 
             x = bin_op_s(a, b, weights)
@@ -195,9 +196,11 @@ class LogicLayer(torch.nn.Module):
                 w = torch.nn.functional.one_hot(self.weights.argmax(-1), 16).to(x.dtype)
             else:
                 # 둘 다 꺼져 있으면 softmax 사용
-                w = torch.nn.functional.softmax(self.weights/self.tau, dim=-1).to(x.dtype)
-                w.retain_grad()
-                self._last_p = w
+                self._last_p = torch.nn.functional.softmax(self.weights/self.tau, dim=-1).to(x.dtype)
+                if self._last_p.requires_grad:
+                    self._last_p.retain_grad()
+                w = self._last_p
+
             # [수정된 로직 끝]
 
             x = LogicLayerCudaFunction.apply(
